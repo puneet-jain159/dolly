@@ -30,23 +30,23 @@
 
 # COMMAND ----------
 
-# kernel_gateway_init = """
-# #!/bin/bash
+kernel_gateway_init = """
+#!/bin/bash
 
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb -O /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-7_11.10.1.25-1_amd64.deb -O /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb -O /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-7_10.2.10.91-1_amd64.deb -O /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb && \
-# dpkg -i /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
-# dpkg -i /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
-# dpkg -i /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
-# dpkg -i /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb
-# """ 
-# # Change ‘username’ to your Databricks username in DBFS
-# # Example: username = “stephen.offer@databricks.com”
-# username = "puneet.jain@databricks.com"
-# dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_init, True)
-# "dbfs:/Users/{0}/init/ray.sh".format(username)
+!wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb -O /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-3_11.5.1.109-1_amd64.deb -O /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb -O /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-3_10.2.4.109-1_amd64.deb -O /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb && \
+  dpkg -i /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+  dpkg -i /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+  dpkg -i /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+  dpkg -i /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb
+""" 
+# Change ‘username’ to your Databricks username in DBFS
+# Example: username = “stephen.offer@databricks.com”
+username = "puneet.jain@databricks.com"
+dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_init, True)
+"dbfs:/Users/{0}/init/ray.sh".format(username)
 
 # COMMAND ----------
 
@@ -136,7 +136,7 @@ seed = DEFAULT_SEED
 
 # COMMAND ----------
 
-# shutdown_ray_cluster()
+shutdown_ray_cluster()
 
 # COMMAND ----------
 
@@ -212,11 +212,11 @@ _ = run_on_every_node(download_model)
 current_dataset = load_training_dataset()
 current_dataset = current_dataset.train_test_split(seed=DEFAULT_SEED)
 
-# current_dataset['train'].select(list(range(0,1000))).save_to_disk("train.hf")
-# current_dataset['test'].select(list(range(0,1000))).save_to_disk('test.hf')
+current_dataset['train'].select(list(range(0,1000))).save_to_disk("train.hf")
+current_dataset['test'].select(list(range(0,1000))).save_to_disk('test.hf')
 
-current_dataset['train'].save_to_disk("train.hf")
-current_dataset['test'].save_to_disk('test.hf')
+# current_dataset['train'].save_to_disk("train.hf")
+# current_dataset['test'].save_to_disk('test.hf')
 del current_dataset
 
 # load the final data as ray data-set
@@ -387,6 +387,8 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     print("Model loaded")
     print("Train data size: %d", len(train_dataset))
     print("Test data size: %d", len(eval_dataset))
+    print("type of data test: %d", type(eval_dataset))
+    print("type of data train: %d", type(train_dataset))
 
     data_collator = DataCollatorForCompletionOnlyLM(
         tokenizer=tokenizer, mlm=False, return_tensors="pt", pad_to_multiple_of=8
@@ -427,8 +429,8 @@ trainer = HuggingFaceTrainer(
     trainer_init_config={
         "deepspeed": deepspeed_config, 
         "lr" : 1e-6, # per device
-        "per_device_train_batch_size" : 6,
-        "per_device_eval_batch_size" : 6,
+        "per_device_train_batch_size" : 8,
+        "per_device_eval_batch_size" : 8,
         "epochs": 2,
     },
     scaling_config=ScalingConfig(
@@ -436,7 +438,7 @@ trainer = HuggingFaceTrainer(
         use_gpu=use_gpu,
         resources_per_worker={"GPU": 1, "CPU": 22}),
     run_config = RunConfig(
-                local_dir =  "/local_disk0/dolly_train/dolly_train/job/",
+                local_dir =  "/dbfs/puneet.jain@databricks.com/dolly_train/job/",
                 callbacks=[MLflowLoggerCallback(experiment_name="/Users/puneet.jain@databricks.com/dolly_multi-gpu_setup",save_artifact=False)],
                 checkpoint_config = CheckpointConfig(num_to_keep = 1, 
                                                      checkpoint_score_attribute = 'eval_loss',
