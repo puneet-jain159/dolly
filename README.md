@@ -89,7 +89,7 @@ Otherwise, follow the steps above. The 12B param model may not function well in 
 
 - Add the `dolly` repo to Databricks (under Repos click Add Repo, enter `https://github.com/databrickslabs/dolly.git`, then click Create Repo).
 
-### Create a init script to deepspeed dependencies
+### Create an init script to install deepspeed dependencies on all the nodes
 - Start a `12.2 LTS ML (includes Apache Spark 3.3.2, GPU, Scala 2.12)` .It is recommended to use A100 GPUs (e.g. `Standard_ND96asr_v4` or `p4d.24xlarge`). Note that these instance types may not be available in all regions, or may be difficult to provision. In Databricks, note that you must select the GPU runtime first, and unselect "Use Photon", for these instance types to appear (where supported).
 - create the below init script to add deepspeed lib depedencies
 ```
@@ -114,37 +114,25 @@ dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_in
 
 - Open the `ray_train_multi_gpu_12_2_dbr_v100` notebook in the Repo (which is the `ray_train_multi_gpu_12_2_dbr_v100.py` file in the Github `dolly` repo), attach to your GPU cluster, and run all cells.  When training finishes, the notebook will save the model under `local_dir =  f"/dbfs/{username}/dolly_train/job/`.
 
-### Training on Other Instances
+### Training on Other Instances and benchmarks
 
 A100 instance types are not available in all cloud regions, or can be hard to provision. Training is possible on other GPU instance types, 
 for smaller Dolly model sizes, and with small modifications to reduce memory usage.
 These modifications are not optimal, but are simple to make.
 
-#### A10 GPUs
 
-Training the 12B param model is not recommended on A10s.
+  See the following table for the E2E time breakdown for training Databricks training set for 15000 records.
 
-To train the 6.9B param model on A10 instances (ex: `g5.24xlarge`, 4 x A10 24GB; `Standard_NV72ads_A10_v5`, 2 x A10), make the following changes:
-
-- Set `per-device-train-batch-size` and `per-device-eval-batch-size` to 3 in the `train_dolly.py` invocation of `deepspeed`
-- Modify the deepspeed config file `ds_z3_bf16_config.json` to configure optimizer offload. Within the `"zero_optimization"` section, add:
-  ```
-  "offload_optimizer": {
-    "device": "cpu",
-    "pin_memory": true
-  },
-  ```
-- Set the `num_gpus` widget in `train_dolly` to the number of GPUs in your instance, such as 2 or 4, before running
-
-To train the 2.8B param model:
-
-- Instead, only set `per-device-train-batch-size` and `per-device-eval-batch-size` to 3 in the `train_dolly.py` invocation of `deepspeed`
+  | Notebook                          |GPU | Batch Size | Epochs  | Time | 
+  | --------------------------------- | ---------- | ---------- | ------- | ------ |
+  | ray_train_multi_gpu_dbr_13_A10 |A10| 10 | 2 | 2.27hr | 
+  | ray_train_multi_gpu_12_2_dbr_v100 |v100| 12 | 2 | 2.01hr |
 
 #### V100 GPUs
 
 To run on V100 instances with 32GB of GPU memory (ex: `p3dn.24xlarge` or `Standard_ND40rs_v2`), follow instructions above, and add:
 
-- Modify `training/trainer.py` to disable `bf16` and enable `fp16` in `TrainingArguments`:
+- Modify script to disable `bf16` and enable `fp16` in `TrainingArguments`:
   ```
   ...
   fp16=True,
