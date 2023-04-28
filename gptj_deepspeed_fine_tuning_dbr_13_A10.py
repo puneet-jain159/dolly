@@ -1,6 +1,18 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC ** this notebook has been tested on 12.2 ML DBR runtime using 2 p3dn.48xlarge **
+# MAGIC **this notebook has been tested on 3 ML DBR runtime using 4 g5.24xlarge**
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Benefits:
+# MAGIC
+# MAGIC 1. NO custom SSH script required
+# MAGIC 2. No command-line trigger / and provides real-time updates
+# MAGIC 3. Runs using ray on spark API
+# MAGIC 4. Better UI to understand JOB performance and scale-out
+# MAGIC 5. Ray data API support data in parquet,csv and hf format
+# MAGIC 6. Has MLFlow integration to track Experiments
 
 # COMMAND ----------
 
@@ -14,7 +26,6 @@
 # MAGIC This example focuses more on the performance and distributed computing aspects of Ray AIR. 
 # MAGIC
 # MAGIC It is highly recommended to read [Ray AIR Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-key-concepts) and [Ray Data Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/data_key_concepts) before starting this example.
-# MAGIC
 # MAGIC
 # MAGIC ```{note}
 # MAGIC In order to run this example, make sure your Ray cluster has access to at least 8 GPU's with 16 or more GBs of memory. The amount of memory needed will depend on the model. This notebook has been  tested with 4 g5.24xlarge workers and g4dn.8xlarge head node.
@@ -36,23 +47,23 @@
 
 # COMMAND ----------
 
-# kernel_gateway_init = """
-# #!/bin/bash
+kernel_gateway_init = """
+#!/bin/bash
 
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb -O /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-3_11.5.1.109-1_amd64.deb -O /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb -O /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-3_10.2.4.109-1_amd64.deb -O /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb && \
-# dpkg -i /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
-# dpkg -i /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
-# dpkg -i /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
-# dpkg -i /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb
-# """ 
-# # Change ‘username’ to your Databricks username in DBFS
-# # Example: username = “stephen.offer@databricks.com”
-# username = "puneet.jain@databricks.com"
-# dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_init, True)
-# "dbfs:/Users/{0}/init/ray.sh".format(username)
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb -O /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
+ wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-7_11.10.1.25-1_amd64.deb -O /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
+ wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb -O /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
+ wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-7_10.2.10.91-1_amd64.deb -O /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb && \
+ dpkg -i /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
+ dpkg -i /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
+ dpkg -i /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
+ dpkg -i /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb
+""" 
+# Change ‘username’ to your Databricks username in DBFS
+# Example: username = “stephen.offer@databricks.com”
+username = "puneet.jain@databricks.com"
+dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_init, True)
+"dbfs:/Users/{0}/init/ray.sh".format(username)
 
 # COMMAND ----------
 
@@ -134,7 +145,7 @@ pretrained_model_name_or_path = "EleutherAI/pythia-12b"
 use_gpu = True
 num_workers = 16
 num_cpu_cores_per_worker = 96
-num_gpu_per_worker = 8
+num_gpu_per_worker = 4
 max_length = 1024
 local_output_dir = '/tmp/run/details'
 gradient_checkpointing = True
@@ -174,6 +185,10 @@ ray.init(runtime_env=runtime_env)
 
 # COMMAND ----------
 
+#read to cache to dbfs
+
+# COMMAND ----------
+
 # THIS SHOULD BE HIDDEN IN DOCS AND ONLY RAN IN CI
 # Download the model from our S3 mirror as it's faster
 
@@ -199,7 +214,7 @@ def run_on_every_node(remote_func_or_actor_class, **remote_kwargs):
 
 @ray.remote(num_gpus=1)
 def download_model():
-    snapshot_download(pretrained_model_name_or_path,resume_download=True) 
+    snapshot_download(pretrained_model_name_or_path,local_dir = '/local_disk0/tmp/',resume_download=True) 
   
 
 _ = run_on_every_node(download_model)
@@ -321,9 +336,11 @@ preprocessor = Chain(
 # MAGIC
 # MAGIC As we are using data parallelism, each worker operates on its own shard of the data. The batch size set in `TrainingArguments` is the **per device batch size** (per worker batch size). By changing the number of workers, we can change the **effective batch size** and thus the time needed for training to complete. The effective batch size is then calculated as `per device batch size * number of workers * number of gradient accumulation steps`. As we add more workers, the effective batch size rises and thus we need less time to complete a full epoch. While the speedup is not exactly linear due to extra communication overheads, in many cases it can be close to linear.
 # MAGIC
-# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 12.
+# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 8.
 # MAGIC
-# MAGIC * With 2 p3dn.48xlarge nodes, the effective batch size was 192, which equals to ~79 steps per epoch. One epoch took **~1 hour** (including initialization time).
+# MAGIC * With 4 g5.24xlarge nodes, the effective batch size was 256, which equals to 85 steps per epoch. One epoch took **~TBD** (including initialization time).
+# MAGIC
+# MAGIC * With 8 g5.4xlarge nodes, the effective batch size was 512, which equals to 43 steps per epoch. One epoch took **~TBD** (including initialization time).
 
 # COMMAND ----------
 
@@ -347,7 +364,7 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     save_steps = config.get("save_steps", 1000)
     eval_steps = config.get("eval_steps", 50) 
     save_total_limit = config.get("save_total_limit", 5)
-    warmup_steps = config.get("warmup_steps", 25)
+    warmup_steps = config.get("warmup_steps", 50)
     
     deepspeed=config.get("deepspeed", "configs/ds_z3_bf16_config.json")
 
@@ -364,8 +381,8 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
         output_dir=local_output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
         per_device_eval_batch_size=per_device_eval_batch_size,
-        fp16=True,  #Set this to true for V100 series and bf16 to false
-        bf16=False, # Set this to true for A10 and A100 serios and fp16 to false
+        fp16=False,
+        bf16=True,
         learning_rate=lr,
         num_train_epochs=epochs,
         deepspeed='/tmp'+'/deepspeed.json',
@@ -377,7 +394,7 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
         eval_steps=eval_steps,
         save_strategy="no",
         save_steps=save_steps,
-        load_best_model_at_end=False, # loaded by ray
+        load_best_model_at_end=False,
         disable_tqdm=True,
         remove_unused_columns=False,
         warmup_steps=warmup_steps)
@@ -391,8 +408,6 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     print("Model loaded")
     print("Train data size: %d", len(train_dataset))
     print("Test data size: %d", len(eval_dataset))
-    print("type of data test: %d", type(eval_dataset))
-    print("type of data train: %d", type(train_dataset))
 
     data_collator = DataCollatorForCompletionOnlyLM(
         tokenizer=tokenizer, mlm=False, return_tensors="pt", pad_to_multiple_of=8
@@ -421,6 +436,10 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
 
 # COMMAND ----------
 
+# avoid duplication and correct
+
+# COMMAND ----------
+
 root_path = os.getcwd()
 deepspeed_config = os.path.join(root_path, "config/ds_z3_bf16_config.json")
 
@@ -433,16 +452,16 @@ trainer = HuggingFaceTrainer(
     trainer_init_config={
         "deepspeed": deepspeed_config, 
         "lr" : 1e-6, # per device
-        "per_device_train_batch_size" : 12,
-        "per_device_eval_batch_size" : 12,
+        "per_device_train_batch_size" : 10,
+        "per_device_eval_batch_size" : 10,
         "epochs": 2,
     },
     scaling_config=ScalingConfig(
         num_workers=16,
         use_gpu=use_gpu,
-        resources_per_worker={"GPU": 1, "CPU": 10}),
+        resources_per_worker={"GPU": 1, "CPU": 22}),
     run_config = RunConfig(
-                local_dir =  "/dbfs/puneet.jain@databricks.com/dolly_train/job/",
+                local_dir =  "/local_disk0/dolly_train/dolly_train/job/",
                 callbacks=[MLflowLoggerCallback(experiment_name="/Users/puneet.jain@databricks.com/dolly_multi-gpu_setup",save_artifact=False)],
                 checkpoint_config = CheckpointConfig(num_to_keep = 1, 
                                                      checkpoint_score_attribute = 'eval_loss',
@@ -451,6 +470,11 @@ trainer = HuggingFaceTrainer(
     datasets={"train": train_dataset , 'evaluation' : test_dataset},
     preprocessor=preprocessor,
 )
+
+# COMMAND ----------
+
+# syncer checkpointing
+# Events 
 
 # COMMAND ----------
 
@@ -479,7 +503,7 @@ checkpoint
 
 # COMMAND ----------
 
-!  ls /dbfs/puneet.jain@databricks.com/dolly_train/job/HuggingFaceTrainer_2023-04-27_14-42-33/HuggingFaceTrainer_beef7_00000_0_2023-04-27_14-42-34/
+!  ls /local_disk0/tmp/ray/job/session_latest/logs/dl_job/HuggingFaceTrainer_2023-04-25_09-47-41/HuggingFaceTrainer_3876c_00000_0_2023-04-25_09-47-41
 
 # COMMAND ----------
 
