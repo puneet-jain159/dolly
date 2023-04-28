@@ -88,8 +88,31 @@ Otherwise, follow the steps above. The 12B param model may not function well in 
 ## Getting Started with Training
 
 - Add the `dolly` repo to Databricks (under Repos click Add Repo, enter `https://github.com/databrickslabs/dolly.git`, then click Create Repo).
-- Start a `12.2 LTS ML (includes Apache Spark 3.3.2, GPU, Scala 2.12)` single-node cluster with node type having 8 A100 GPUs (e.g. `Standard_ND96asr_v4` or `p4d.24xlarge`). Note that these instance types may not be available in all regions, or may be difficult to provision. In Databricks, note that you must select the GPU runtime first, and unselect "Use Photon", for these instance types to appear (where supported).
-- Open the `train_dolly` notebook in the Repo (which is the `train_dolly.py` file in the Github `dolly` repo), attach to your GPU cluster, and run all cells.  When training finishes, the notebook will save the model under `/dbfs/dolly_training`.
+
+### Create a init script to deepspeed dependencies
+- Start a `12.2 LTS ML (includes Apache Spark 3.3.2, GPU, Scala 2.12)` .It is recommended to use A100 GPUs (e.g. `Standard_ND96asr_v4` or `p4d.24xlarge`). Note that these instance types may not be available in all regions, or may be difficult to provision. In Databricks, note that you must select the GPU runtime first, and unselect "Use Photon", for these instance types to appear (where supported).
+- create the below init script to add deepspeed lib depedencies
+```
+kernel_gateway_init = """
+#!/bin/bash
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb -O /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-3_11.5.1.109-1_amd64.deb -O /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb -O /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-3_10.2.4.109-1_amd64.deb -O /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb && \
+dpkg -i /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+dpkg -i /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+dpkg -i /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+dpkg -i /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb
+""" 
+# Change ‘username’ to your Databricks username in DBFS
+# Example: username = “abc@databricks.com”
+username = ""
+dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_init, True)
+"dbfs:/Users/{0}/init/ray.sh".format(username)
+```
+- attach the init script to the cluster and restart the it.
+
+- Open the `ray_train_multi_gpu_12_2_dbr_v100` notebook in the Repo (which is the `ray_train_multi_gpu_12_2_dbr_v100.py` file in the Github `dolly` repo), attach to your GPU cluster, and run all cells.  When training finishes, the notebook will save the model under `local_dir =  f"/dbfs/{username}/dolly_train/job/`.
 
 ### Training on Other Instances
 

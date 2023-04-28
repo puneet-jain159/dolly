@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC **this notebook has been tested on 3 ML DBR runtime using 4 g5.24xlarge**
+# MAGIC **This notebook has been tested on 3 ML DBR runtime using 4 g5.24xlarge**
 
 # COMMAND ----------
 
@@ -47,23 +47,23 @@
 
 # COMMAND ----------
 
-kernel_gateway_init = """
-#!/bin/bash
+# kernel_gateway_init = """
+# #!/bin/bash
 
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb -O /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
- wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-7_11.10.1.25-1_amd64.deb -O /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
- wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb -O /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
- wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-7_10.2.10.91-1_amd64.deb -O /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb && \
- dpkg -i /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
- dpkg -i /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
- dpkg -i /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
- dpkg -i /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb
-""" 
-# Change ‘username’ to your Databricks username in DBFS
-# Example: username = “stephen.offer@databricks.com”
-username = "puneet.jain@databricks.com"
-dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_init, True)
-"dbfs:/Users/{0}/init/ray.sh".format(username)
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb -O /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
+#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-7_11.10.1.25-1_amd64.deb -O /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
+#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb -O /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
+#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-7_10.2.10.91-1_amd64.deb -O /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb && \
+#  dpkg -i /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
+#  dpkg -i /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
+#  dpkg -i /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
+#  dpkg -i /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb
+# """ 
+# # Change ‘username’ to your Databricks username in DBFS
+# # Example: username = “stephen.offer@databricks.com”
+# username = "puneet.jain@databricks.com"
+# dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_init, True)
+# "dbfs:/Users/{0}/init/ray.sh".format(username)
 
 # COMMAND ----------
 
@@ -143,13 +143,14 @@ from training.consts import (
 
 pretrained_model_name_or_path = "EleutherAI/pythia-12b"
 use_gpu = True
-num_workers = 16
-num_cpu_cores_per_worker = 96
-num_gpu_per_worker = 4
+num_workers = 16 # Configure based on the total gpus across the worker node
+num_cpu_cores_per_worker = 96 # total cpu's present in each node
+num_gpu_per_worker = 4 # total gpu's present in each node
 max_length = 1024
 local_output_dir = '/tmp/run/details'
 gradient_checkpointing = True
 seed = DEFAULT_SEED 
+username = 'puneet.jain@databricks.com'
 
 # COMMAND ----------
 
@@ -185,12 +186,6 @@ ray.init(runtime_env=runtime_env)
 
 # COMMAND ----------
 
-#read to cache to dbfs
-
-# COMMAND ----------
-
-# THIS SHOULD BE HIDDEN IN DOCS AND ONLY RAN IN CI
-# Download the model from our S3 mirror as it's faster
 
 def force_on_node(node_id: str, remote_func_or_actor_class):
     scheduling_strategy = ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
@@ -236,12 +231,12 @@ current_dataset = current_dataset.train_test_split(seed=DEFAULT_SEED)
 # current_dataset['train'].select(list(range(0,1000))).save_to_disk("train.hf")
 # current_dataset['test'].select(list(range(0,1000))).save_to_disk('test.hf')
 
-current_dataset['train'].save_to_disk("train.hf")
-current_dataset['test'].save_to_disk('test.hf')
+current_dataset['train'].save_to_disk("/local_disk0/train.hf")
+current_dataset['test'].save_to_disk('/local_disk0/test.hf')
 del current_dataset
 
 # load the final data as ray data-set
-train_dataset = ray.data.from_huggingface(load_from_disk('train.hf'))
+train_dataset = ray.data.from_huggingface(load_from_disk('/local_disk0/train.hf'))
 test_dataset = ray.data.from_huggingface(load_from_disk('test.hf'))
 
 # COMMAND ----------
@@ -296,20 +291,6 @@ preprocessor = Chain(
 )
 
 
-# trainer = DummyTrainer(
-#     scaling_config=ScalingConfig(
-#                                  num_workers=1,
-# #                                  resources_per_worker ={"CPU": 2},
-#                                  use_gpu=False),
-#     run_config = RunConfig(sync_config= tune.syncer.SyncConfig(syncer= None)),
-#     datasets={"train": train_dataset},
-#     preprocessor=preprocessor,
-#     num_epochs=1,  # Stop after this number of epochs is read.
-# #     prefetch_blocks=1,  # Number of blocks to prefetch when reading data.
-# #     batch_size=100,  # Use whole blocks as batches.
-# )
-# trainer.fit()
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -336,9 +317,9 @@ preprocessor = Chain(
 # MAGIC
 # MAGIC As we are using data parallelism, each worker operates on its own shard of the data. The batch size set in `TrainingArguments` is the **per device batch size** (per worker batch size). By changing the number of workers, we can change the **effective batch size** and thus the time needed for training to complete. The effective batch size is then calculated as `per device batch size * number of workers * number of gradient accumulation steps`. As we add more workers, the effective batch size rises and thus we need less time to complete a full epoch. While the speedup is not exactly linear due to extra communication overheads, in many cases it can be close to linear.
 # MAGIC
-# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 8.
+# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 10.
 # MAGIC
-# MAGIC * With 4 g5.24xlarge nodes, the effective batch size was 256, which equals to 85 steps per epoch. One epoch took **~TBD** (including initialization time).
+# MAGIC * With 4 g5.24xlarge nodes, the effective batch size was 160, which equals to 85 steps per epoch. two epoch took 2.27 hours (including initialization and saving time).
 # MAGIC
 # MAGIC * With 8 g5.4xlarge nodes, the effective batch size was 512, which equals to 43 steps per epoch. One epoch took **~TBD** (including initialization time).
 
@@ -461,8 +442,8 @@ trainer = HuggingFaceTrainer(
         use_gpu=use_gpu,
         resources_per_worker={"GPU": 1, "CPU": 22}),
     run_config = RunConfig(
-                local_dir =  "/local_disk0/dolly_train/dolly_train/job/",
-                callbacks=[MLflowLoggerCallback(experiment_name="/Users/puneet.jain@databricks.com/dolly_multi-gpu_setup",save_artifact=False)],
+                local_dir =  f"/dbfs/{username}/dolly_train/job/",
+                callbacks=[MLflowLoggerCallback(experiment_name=f"/Users/{username}/dolly_multi-gpu_setup",save_artifact=False)],
                 checkpoint_config = CheckpointConfig(num_to_keep = 1, 
                                                      checkpoint_score_attribute = 'eval_loss',
                                                      checkpoint_score_order = 'min') 
@@ -503,57 +484,47 @@ checkpoint
 
 # COMMAND ----------
 
-!  ls /local_disk0/tmp/ray/job/session_latest/logs/dl_job/HuggingFaceTrainer_2023-04-25_09-47-41/HuggingFaceTrainer_3876c_00000_0_2023-04-25_09-47-41
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ### Generate text from prompt
-# MAGIC
-# MAGIC We can use the {class}`~ray.train.huggingface.huggingface_predictor.HuggingFacePredictor` to generate predictions from our fine-tuned model.
-# MAGIC
-# MAGIC ```{tip}
-# MAGIC For large scale batch inference, consider configuring cloud checkpointing and then pass the cloud-backed {class}`~ray.air.checkpoint.Checkpoint` to {class}`~ray.train.batch_predictor.BatchPredictor`. More information [here](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-predictors).
-# MAGIC ```
-# MAGIC
-# MAGIC Because the {class}`~ray.train.huggingface.huggingface_predictor.HuggingFacePredictor` uses a 🤗 Transformers [`pipeline`](https://huggingface.co/docs/transformers/en/main_classes/pipelines) under the hood, we disable the tokenizer AIR Preprocessor we have used for training and let the `pipeline` to tokenize the data itself.
 
 # COMMAND ----------
 
-checkpoint.set_preprocessor(None)
+from training.generate import generate_response, load_model_tokenizer_for_generate
+from accelerate import init_empty_weights
+from transformers import AutoConfig, AutoModelForCausalLM,AutoTokenizer
+import os
+
+
+config = AutoConfig.from_pretrained(checkpoint.local_path)
+
+with init_empty_weights():
+    model = AutoModelForCausalLM.from_config(config)
+
+model.tie_weights()
+
+from accelerate import infer_auto_device_map
+
+device_map = infer_auto_device_map(model, max_memory={0: "20GiB", "cpu": "60GiB"},no_split_module_classes=["GPTNeoXLayer"])
+
+model = AutoModelForCausalLM.from_pretrained(
+        checkpoint, device_map=device_map, torch_dtype=torch.bfloat16,GPTNeoXLayer
+    )
 
 # COMMAND ----------
+tokenizer = AutoTokenizer.from_pretrained(checkpoint, padding_side="left")
 
-# MAGIC %md
-# MAGIC We also set `device_map="auto"` so that the model is automatically placed on the right device and set the `task` to `"text-generation"`. The `predict` method passes the arguments to a 🤗 Transformers `pipeline` call.
+# Examples from https://www.databricks.com/blog/2023/03/24/hello-dolly-democratizing-magic-chatgpt-open-models.html
+instructions = [
+    "Write a love letter to Edgar Allan Poe.",
+    "Write a tweet announcing Dolly, a large language model from Databricks.",
+    "I'm selling my Nikon D-750, write a short blurb for my ad.",
+    "Explain to me the difference between nuclear fission and fusion.",
+    "Give me a list of 5 science fiction books I should read next.",
+]
 
-# COMMAND ----------
-
-from ray.train.huggingface import HuggingFacePredictor
-import pandas as pd
-
-prompts = pd.DataFrame(["Romeo and Juliet", "Romeo", "Juliet"], columns=["text"])
-
-# Predict on the head node.
-predictor = HuggingFacePredictor.from_checkpoint(
-    checkpoint=checkpoint,
-    task="text-generation",
-    torch_dtype=torch.float16 if use_gpu else None,
-    device_map="auto",
-    use_gpu=use_gpu,
-)
-prediction = predictor.predict(
-    prompts,
-    do_sample=True,
-    temperature=0.9,
-    min_length=32,
-    max_length=128,
-)
-
-# COMMAND ----------
-
-prediction
-
-# COMMAND ----------
-
+# Use the model to generate responses for each of the instructions above.
+for instruction in instructions:
+    response = generate_response(instruction, model=model, tokenizer=tokenizer)
+    if response:
+        print(f"Instruction: {instruction}\n\n{response}\n\n-----------\n")
 

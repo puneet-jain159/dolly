@@ -1,48 +1,52 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # GPT-J-6B Fine-Tuning with Ray AIR and DeepSpeed
-# MAGIC 
-# MAGIC In this example, we will showcase how to use the Ray AIR for **GPT-J fine-tuning**. GPT-J is a GPT-2-like causal language model trained on the Pile dataset. This particular model has 6 billion parameters. For more information on GPT-J, click [here](https://huggingface.co/docs/transformers/model_doc/gptj).
-# MAGIC 
-# MAGIC We will use Ray AIR (with the 🤗 Transformers integration) and a pretrained model from Hugging Face hub. Note that you can easily adapt this example to use other similar models.
-# MAGIC 
-# MAGIC This example focuses more on the performance and distributed computing aspects of Ray AIR. If you are looking for a more beginner friendly introduction to Ray AIR 🤗 Transformers integration, see {doc}`this example </ray-air/examples/huggingface_text_classification>`.
-# MAGIC 
-# MAGIC It is highly recommended to read [Ray AIR Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-key-concepts) and [Ray Data Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/data_key_concepts) before starting this example.
-# MAGIC 
-# MAGIC ```{note}
-# MAGIC In order to run this example, make sure your Ray cluster has access to at least one GPU with 16 or more GBs of memory. The amount of memory needed will depend on the model. This notebook is being tested with 16 g4dn.4xlarge instances.
-# MAGIC ```
-# MAGIC 
-# MAGIC In this notebook, we will:
-# MAGIC 1. [Set up Ray](#setup)
-# MAGIC 2. [Load the dataset](#load)
-# MAGIC 3. [Preprocess the dataset with Ray AIR](#preprocess)
-# MAGIC 4. [Run the training with Ray AIR](#train)
-# MAGIC 5. [Generate text from prompt with Ray AIR](#predict)
-
-# COMMAND ----------
-
-
+# MAGIC **This notebook has been tested on 12.2 ML DBR runtime using 2 p3dn.48xlarge**
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Uncomment and run the following line in order to install all the necessary dependencies (this notebook is being tested with `transformers==4.26.0`):
+# MAGIC #Fine-Tuning with Ray AIR and DeepSpeed on Databricks
+# MAGIC
+# MAGIC In this example, we will showcase how to use the Ray AIR for **pythia-12b**. These causal language model trained on the Pile dataset(825 GB). This particular model has 12 billion parameters. For more information on pythia-12b click [here](https://huggingface.co/EleutherAI/pythia-12b).
+# MAGIC
+# MAGIC We will use Ray AIR (with the 🤗 Transformers integration) and a pretrained model from Hugging Face hub. Note that you can easily adapt this example to use other similar models.
+# MAGIC
+# MAGIC This example focuses more on the performance and distributed computing aspects of Ray AIR. 
+# MAGIC
+# MAGIC It is highly recommended to read [Ray AIR Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-key-concepts) and [Ray Data Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/data_key_concepts) before starting this example.
+# MAGIC
+# MAGIC
+# MAGIC ```{note}
+# MAGIC In order to run this example, make sure your Ray cluster has access to at least 8 GPU's with 16 or more GBs of memory. The amount of memory needed will depend on the model. This notebook has been  tested with 4 g5.24xlarge workers and g4dn.8xlarge head node.
+# MAGIC ```
+# MAGIC
+# MAGIC In this notebook, we will:
+# MAGIC 1. [Add Dependencies to run deepspeed](#Deepspeed)
+# MAGIC 2. [Set up Ray](#setup)
+# MAGIC 3. [Load the dataset](#load)
+# MAGIC 4. [Preprocess the dataset with Ray AIR](#preprocess)
+# MAGIC 5. [Run the training with Ray AIR](#train)
+# MAGIC 6. [Generate text from prompt with Ray AIR](#predict)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Load Dependencies for Deepspeed <a name="deepspeed"></a>
+# MAGIC Uncomment and run the following line in order to create an init script which loads the dependencies required for Deepspeed (this notebook is being tested with `transformers==4.26.0`):
 
 # COMMAND ----------
 
 # kernel_gateway_init = """
 # #!/bin/bash
 
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb -O /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-7_11.10.1.25-1_amd64.deb -O /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb -O /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-7_10.2.10.91-1_amd64.deb -O /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb && \
-# dpkg -i /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
-# dpkg -i /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
-# dpkg -i /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
-# dpkg -i /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb -O /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-3_11.5.1.109-1_amd64.deb -O /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb -O /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-3_10.2.4.109-1_amd64.deb -O /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb && \
+# dpkg -i /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+# dpkg -i /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+# dpkg -i /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+# dpkg -i /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb
 # """ 
 # # Change ‘username’ to your Databricks username in DBFS
 # # Example: username = “stephen.offer@databricks.com”
@@ -52,60 +56,53 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install -r requirements.txt
-
-# COMMAND ----------
-
-# shutdown_ray_cluster()
-
-# COMMAND ----------
-
-import os
-import re
-from datetime import datetime
-from training.consts import DEFAULT_INPUT_MODEL, SUGGESTED_INPUT_MODELS
-from training.trainer import load_tokenizer
-from ray.util.spark import setup_ray_cluster, shutdown_ray_cluster,MAX_NUM_WORKER_NODES
-import ray
-
-setup_ray_cluster(
-  num_worker_nodes=MAX_NUM_WORKER_NODES,
-  num_cpus_per_node=96,
-  num_gpus_per_node=4,
-
-  collect_log_to_path="/dbfs/path/to/ray_collected_logs"
-)
-
-dbutils.widgets.combobox("input_model", DEFAULT_INPUT_MODEL, SUGGESTED_INPUT_MODELS, "input_model")
-dbutils.widgets.text("num_gpus", "", "num_gpus")
-dbutils.widgets.text("local_training_root", "", "local_training_root")
-dbutils.widgets.text("dbfs_output_root","", "dbfs_output_root")
-dbutils.widgets.text("experiment_id", "", "experiment_id")
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## Set up Ray <a name="setup"></a>
-# MAGIC 
-# MAGIC First, let's set some global variables. We will use 16 workers, each being assigned 1 GPU and 8 CPUs.
+# MAGIC
+# MAGIC First, Let us start a ray cluster based on the cluster configuration. we need to specify the number of cores and gpus available per worker to **setup_ray_cluster** to create the correct multi-node setup
 
 # COMMAND ----------
 
-runtime_env = {
-    "env_vars": {"RAY_memory_monitor_refresh_ms": "0"}
-}
-ray.init(runtime_env=runtime_env)
+#install dependencies
+%pip install -r requirements.txt
 
 # COMMAND ----------
 
+# Import all the packages
+import os
+import re
+import json
 import logging
-from functools import partial
+import subprocess
+
 from pathlib import Path
+from functools import partial
+from datetime import datetime
 from typing import Any, Dict, List, Tuple, Union
 
-import click
-import numpy as np
+import ray
+from ray.air import session
+import ray.util.scheduling_strategies
+from ray.train.huggingface import HuggingFaceTrainer
+from ray.air.integrations.mlflow import MLflowLoggerCallback
+from ray.air.config import ScalingConfig
+
+from ray.data.preprocessors import Chain
+from ray.util.spark import setup_ray_cluster, shutdown_ray_cluster,MAX_NUM_WORKER_NODES
+
+from training.trainer import load_training_dataset
+from training.consts import DEFAULT_INPUT_MODEL, SUGGESTED_INPUT_MODELS
+
+
+
+
 from datasets import Dataset, load_dataset
+from huggingface_hub import snapshot_download
+from datasets import load_dataset,load_from_disk
+
+import numpy as np
+import torch 
+
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -128,27 +125,58 @@ from training.consts import (
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Define variables (can be added as databricks widgets as well)
+
+# COMMAND ----------
+
 pretrained_model_name_or_path = "EleutherAI/pythia-12b"
 use_gpu = True
 num_workers = 16
+num_cpu_cores_per_worker = 96
+num_gpu_per_worker = 8
+max_length = 1024
+local_output_dir = '/tmp/run/details'
+gradient_checkpointing = True
+seed = DEFAULT_SEED 
+username = "puneet.jain@databricks.com"
+
+# COMMAND ----------
+
+# shutdown_ray_cluster()
+
+# COMMAND ----------
+
+# Start the ray cluster
+setup_ray_cluster(
+  num_worker_nodes=MAX_NUM_WORKER_NODES,
+  num_cpus_per_node=num_cpu_cores_per_worker,
+  num_gpus_per_node=num_gpu_per_worker,
+  collect_log_to_path="/dbfs/path/to/ray_collected_logs")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC We will use `ray.init()` to initialize a local cluster. By default, this cluster will be comprised of only the machine you are running this notebook on. You can also run this notebook on an Anyscale cluster.
-# MAGIC 
-# MAGIC We define a {ref}`runtime environment <runtime-environments>` to ensure that the Ray workers have access to all the necessary packages. You can omit the `runtime_env` argument if you have all of the packages already installed on each node in your cluster.
+# MAGIC We will use `ray.init()` to initialize the ray cluster in the current session.
+# MAGIC
+# MAGIC We define a `runtime_env` to ensure that the Ray workers have access to all the necessary packages. You can omit the `runtime_env` argument if you have all of the packages already installed on each node in your cluster.
+
+# COMMAND ----------
+
+runtime_env = {
+    "env_vars": {"RAY_memory_monitor_refresh_ms": "0"}
+}
+ray.init(runtime_env=runtime_env)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC we will catch the models in the local nodes to avoid getting it from HF Server everytime during training calling the `snapshot_download()` command from HF 
 
 # COMMAND ----------
 
 # THIS SHOULD BE HIDDEN IN DOCS AND ONLY RAN IN CI
 # Download the model from our S3 mirror as it's faster
-
-import ray
-import subprocess
-import ray.util.scheduling_strategies
-from huggingface_hub import snapshot_download
-
 
 def force_on_node(node_id: str, remote_func_or_actor_class):
     scheduling_strategy = ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
@@ -172,7 +200,7 @@ def run_on_every_node(remote_func_or_actor_class, **remote_kwargs):
 
 @ray.remote(num_gpus=1)
 def download_model():
-    snapshot_download('EleutherAI/pythia-12b',local_dir = '/local_disk0/tmp/',resume_download=True) 
+    snapshot_download(pretrained_model_name_or_path,resume_download=True) 
   
 
 _ = run_on_every_node(download_model)
@@ -181,14 +209,12 @@ _ = run_on_every_node(download_model)
 
 # MAGIC %md
 # MAGIC ## Loading the dataset <a name="load"></a>
-# MAGIC 
-# MAGIC We will be fine-tuning the model on the [`tiny_shakespeare` dataset](https://huggingface.co/datasets/tiny_shakespeare), comprised of 40,000 lines of Shakespeare from a variety of Shakespeare's plays. The aim will be to make the GPT-J model better at generating text in the style of Shakespeare.
+# MAGIC
+# MAGIC We will be fine-tuning the model on the the Databricks crowd sourced dataset , it comprised of 15,000 lines of Question and Answer pairs . The aim will be to make the GPT model.
+# MAGIC
+# MAGIC We will use [Ray Data](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/data) for distributed preprocessing and data ingestion. We can easily convert the dataset obtained from Hugging Face Hub to Ray Data by using {meth}`ray.data.from_huggingface`.
 
 # COMMAND ----------
-
-from training.trainer import load_training_dataset
-from datasets import load_dataset,load_from_disk
-import ray.data
 
 current_dataset = load_training_dataset()
 current_dataset = current_dataset.train_test_split(seed=DEFAULT_SEED)
@@ -199,26 +225,26 @@ current_dataset = current_dataset.train_test_split(seed=DEFAULT_SEED)
 current_dataset['train'].save_to_disk("train.hf")
 current_dataset['test'].save_to_disk('test.hf')
 del current_dataset
+
+# load the final data as ray data-set
 train_dataset = ray.data.from_huggingface(load_from_disk('train.hf'))
 test_dataset = ray.data.from_huggingface(load_from_disk('test.hf'))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC We will use [Ray Data](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/data) for distributed preprocessing and data ingestion. We can easily convert the dataset obtained from Hugging Face Hub to Ray Data by using {meth}`ray.data.from_huggingface`.
+# MAGIC ## Preprocess the Dataset
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Because the dataset is represented by a single large string, we will need to do some preprocessing. For that, we will define two [Ray AIR Preprocessors](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-preprocessors) using the {class}`~ray.data.preprocessors.BatchMapper` API, allowing us to define functions that will be applied on batches of data.
-# MAGIC 
-# MAGIC The `split_text` function will take the single string and split it into separate lines, removing empty lines and character names ending with ':' (eg. 'ROMEO:'). The `tokenize` function will take the lines and tokenize them using the 🤗 Tokenizer associated with the model, ensuring each entry has the same length (`block_size`) by padding and truncating. This is necessary for training.
-# MAGIC 
+# MAGIC We will need to do some preprocessing. For that, we will define two [Ray AIR Preprocessors](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-preprocessors) using the {class}`~ray.data.preprocessors.BatchMapper` API, allowing us to define functions that will be applied on batches of data.
+# MAGIC
+# MAGIC The `preprocess` function will call The `tokenize` function will take the lines and tokenize them using the 🤗 Tokenizer associated with the model, ensuring each entry has the same length (`max_length`) by padding and truncating. This is necessary for training.
+# MAGIC
 # MAGIC ```{note}
 # MAGIC This preprocessing can be done in other ways. A common pattern is to tokenize first, and then split the obtained tokens into equally-sized blocks.
 # MAGIC ```
-# MAGIC 
-# MAGIC We will use the `splitter` and `tokenizer` Preprocessors below.
 
 # COMMAND ----------
 
@@ -234,11 +260,8 @@ from ray.air.config import ScalingConfig,RunConfig,CheckpointConfig
 from training.trainer import load_tokenizer,preprocess_batch,\
                              DataCollatorForCompletionOnlyLM,get_model_tokenizer
 
-logger = logging.getLogger(__name__)
-
 def preprocess(batch):
   tokenizer = load_tokenizer(pretrained_model_name_or_path)
-  max_length = 1024
   seed=DEFAULT_SEED
   dataset = Dataset.from_pandas(batch)
   _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer)
@@ -250,13 +273,7 @@ def preprocess(batch):
 
   # Make sure we don't have any truncated records, as this would mean the end keyword is missing.
   dataset = dataset.filter(lambda rec: len(rec["input_ids"]) < max_length)
-  
-  # logger.info("Shuffling dataset")
   dataset = dataset.shuffle(seed=seed)
-
-  # logger.info("Done preprocessing")
-
-
   return dataset.to_pandas()
 
 
@@ -264,66 +281,37 @@ preprocessor = Chain(
     BatchMapper(preprocess, batch_format="pandas")
 )
 
-
-# trainer = DummyTrainer(
-#     scaling_config=ScalingConfig(
-#                                  num_workers=1,
-# #                                  resources_per_worker ={"CPU": 2},
-#                                  use_gpu=False),
-#     run_config = RunConfig(sync_config= tune.syncer.SyncConfig(syncer= None)),
-#     datasets={"train": train_dataset},
-#     preprocessor=preprocessor,
-#     num_epochs=1,  # Stop after this number of epochs is read.
-# #     prefetch_blocks=1,  # Number of blocks to prefetch when reading data.
-# #     batch_size=100,  # Use whole blocks as batches.
-# )
-# trainer.fit()
-
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Fine-tuning the model with Ray AIR <a name="train"></a>
-# MAGIC 
+# MAGIC
 # MAGIC We can now configure Ray AIR's {class}`~ray.train.huggingface.huggingface_trainer.HuggingFaceTrainer` to perform distributed fine-tuning of the model. In order to do that, we specify a `trainer_init_per_worker` function, which creates a 🤗 Transformers `Trainer` that will be distributed by Ray using Distributed Data Parallelism (using PyTorch Distributed backend internally). This means that each worker will have its own copy of the model, but operate on different data, At the end of each step, all the workers will sync gradients.
-# MAGIC 
-# MAGIC Because GPT-J is a relatively large model, it may not be possible to fit it on smaller GPU types (<=16 GB GRAM). To deal with that issue, we can use [DeepSpeed](https://github.com/microsoft/DeepSpeed), a library to optimize the training process and allow us to (among other things) offload and partition optimizer and parameter states, reducing GRAM usage. Furthermore, DeepSpeed ZeRO Stage 3 allows us to load large models without running out of memory.
-# MAGIC 
+# MAGIC
+# MAGIC Because pythia-12b is a relatively large model, it may not be possible to fit it on smaller GPU types (<=16 GB GRAM). To deal with that issue, we can use [DeepSpeed](https://github.com/microsoft/DeepSpeed), a library to optimize the training process and allow us to (among other things) offload and partition optimizer and parameter states, reducing GRAM usage. Furthermore, DeepSpeed ZeRO Stage 3 allows us to load large models without running out of memory.
+# MAGIC
 # MAGIC 🤗 Transformers and Ray AIR's integration ({class}`~ray.train.huggingface.huggingface_trainer.HuggingFaceTrainer`) allow you to easily configure and use DDP and DeepSpeed. All you need to do is specify the DeepSpeed configuration in the [`TrainingArguments`](https://huggingface.co/docs/transformers/en/main_classes/trainer#transformers.TrainingArguments) object.
-# MAGIC 
+# MAGIC
 # MAGIC ```{tip}
 # MAGIC There are many DeepSpeed settings that allow you to trade-off speed for memory usage. The settings used below are tailored to the cluster setup used (16 g4dn.4xlarge nodes) and per device batch size of 16. Some things to keep in mind:
 # MAGIC - If your GPUs support bfloat16, use that instead of float16 mixed precision to get better performance and prevent overflows. Replace `fp16=True` with `bf16=True` in `TrainingArguments`.
 # MAGIC - If you are running out of GRAM: try reducing batch size (defined in the cell below the next one), set `"overlap_comm": False` in DeepSpeed config.
 # MAGIC - If you are running out of RAM, add more nodes to your cluster, use nodes with more RAM, set `"pin_memory": False` in the DeepSpeed config, reduce the batch size, and remove `"offload_param"` from the DeepSpeed config.
-# MAGIC 
+# MAGIC
 # MAGIC For more information on DeepSpeed configuration, refer to [Hugging Face documentation](https://huggingface.co/docs/transformers/main_classes/deepspeed) and [DeepSpeed documentation](https://www.deepspeed.ai/docs/config-json/).
-# MAGIC 
+# MAGIC
 # MAGIC Additionally, if you prefer a lower-level API, the logic below can be expressed as an [Accelerate training loop](https://github.com/huggingface/accelerate/blob/main/examples/by_feature/deepspeed_with_config_support.py) distributed by a Ray AIR {class}`~ray.train.torch.torch_trainer.TorchTrainer`.
 # MAGIC ```
-# MAGIC 
+# MAGIC
 # MAGIC #### Training speed
-# MAGIC 
+# MAGIC
 # MAGIC As we are using data parallelism, each worker operates on its own shard of the data. The batch size set in `TrainingArguments` is the **per device batch size** (per worker batch size). By changing the number of workers, we can change the **effective batch size** and thus the time needed for training to complete. The effective batch size is then calculated as `per device batch size * number of workers * number of gradient accumulation steps`. As we add more workers, the effective batch size rises and thus we need less time to complete a full epoch. While the speedup is not exactly linear due to extra communication overheads, in many cases it can be close to linear.
-# MAGIC 
-# MAGIC The preprocessed dataset has 1348 examples. We have set per device batch size to 16.
-# MAGIC 
-# MAGIC * With 16 g4dn.4xlarge nodes, the effective batch size was 256, which equals to 85 steps per epoch. One epoch took **~2440 seconds** (including initialization time).
-# MAGIC 
-# MAGIC * With 32 g4dn.4xlarge nodes, the effective batch size was 512, which equals to 43 steps per epoch. One epoch took **~1280 seconds** (including initialization time).
+# MAGIC
+# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 12.
+# MAGIC
+# MAGIC * With 2 p3dn.48xlarge nodes, the effective batch size was 192, which equals to ~79 steps per epoch. One epoch took **~1 hour** (including initialization time).
 
 # COMMAND ----------
-
-from functools import partial
-from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
-import numpy as np
-import torch 
-
-from ray.air import session
-
-local_output_dir = '/tmp/run/details'
-gradient_checkpointing = True
-seed = DEFAULT_SEED 
 
 def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
 
@@ -345,7 +333,7 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     save_steps = config.get("save_steps", 1000)
     eval_steps = config.get("eval_steps", 50) 
     save_total_limit = config.get("save_total_limit", 5)
-    warmup_steps = config.get("warmup_steps", 50)
+    warmup_steps = config.get("warmup_steps", 25)
     
     deepspeed=config.get("deepspeed", "configs/ds_z3_bf16_config.json")
 
@@ -362,8 +350,8 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
         output_dir=local_output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
         per_device_eval_batch_size=per_device_eval_batch_size,
-        fp16=False,
-        bf16=True,
+        fp16=True,  #Set this to true for V100 series and bf16 to false
+        bf16=False, # Set this to true for A10 and A100 serios and fp16 to false
         learning_rate=lr,
         num_train_epochs=epochs,
         deepspeed='/tmp'+'/deepspeed.json',
@@ -375,7 +363,7 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
         eval_steps=eval_steps,
         save_strategy="no",
         save_steps=save_steps,
-        load_best_model_at_end=False,
+        load_best_model_at_end=False, # loaded by ray
         disable_tqdm=True,
         remove_unused_columns=False,
         warmup_steps=warmup_steps)
@@ -389,6 +377,8 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     print("Model loaded")
     print("Train data size: %d", len(train_dataset))
     print("Test data size: %d", len(eval_dataset))
+    print("type of data test: %d", type(eval_dataset))
+    print("type of data train: %d", type(train_dataset))
 
     data_collator = DataCollatorForCompletionOnlyLM(
         tokenizer=tokenizer, mlm=False, return_tensors="pt", pad_to_multiple_of=8
@@ -408,18 +398,14 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
 
 # MAGIC %md
 # MAGIC With our `trainer_init_per_worker` complete, we can now instantiate the {class}`~ray.train.huggingface.huggingface_trainer.HuggingFaceTrainer`. Aside from the function, we set the `scaling_config`, controlling the amount of workers and resources used, and the `datasets` we will use for training and evaluation.
-# MAGIC 
+# MAGIC
 # MAGIC We pass the preprocessors we have defined earlier as an argument, wrapped in a {class}`~ray.data.preprocessors.chain.Chain`. The preprocessor will be included with the returned {class}`~ray.air.checkpoint.Checkpoint`, meaning it will also be applied during inference.
-# MAGIC 
+# MAGIC
 # MAGIC ```{note}
 # MAGIC If you want to upload checkpoints to cloud storage (eg. S3), set {class}`air.RunConfig(storage_path) <ray.air.RunConfig>`. See {ref}`train-run-config` for an example. Using cloud storage is highly recommended, especially for production.
 # MAGIC ```
 
 # COMMAND ----------
-
-import json
-timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-model_name = "dolly"
 
 root_path = os.getcwd()
 deepspeed_config = os.path.join(root_path, "config/ds_z3_bf16_config.json")
@@ -428,40 +414,25 @@ with open(deepspeed_config) as json_data:
     deepspeed_config = json.load(json_data)
 
 
-num_gpus = dbutils.widgets.get("num_gpus")
-if num_gpus:
-    num_gpus = int(num_gpus)
-
-
-# COMMAND ----------
-
-from ray.train.huggingface import HuggingFaceTrainer
-from ray.air.integrations.mlflow import MLflowLoggerCallback
-from ray.air.config import ScalingConfig
-from ray.data.preprocessors import Chain
-
-use_gpu = True
-
 trainer = HuggingFaceTrainer(
     trainer_init_per_worker=trainer_init_per_worker,
     trainer_init_config={
         "deepspeed": deepspeed_config, 
         "lr" : 1e-6, # per device
-        "per_device_train_batch_size" : 8,
-        "per_device_eval_batch_size" : 8,
+        "per_device_train_batch_size" : 12,
+        "per_device_eval_batch_size" : 12,
         "epochs": 2,
     },
     scaling_config=ScalingConfig(
         num_workers=16,
         use_gpu=use_gpu,
-        resources_per_worker={"GPU": 1, "CPU": 22}),
+        resources_per_worker={"GPU": 1, "CPU": 10}),
     run_config = RunConfig(
-                local_dir =  "/local_disk0/tmp/ray/job/session_latest/logs/dl_job",
-                callbacks=[MLflowLoggerCallback(experiment_name="/Users/puneet.jain@databricks.com/dolly_multi-gpu_setup",save_artifact=False)],
-#                 sync_config = tune.syncer.SyncConfig(syncer=None),
-                # checkpoint_config = CheckpointConfig(num_to_keep = 2 , 
-                #                                      checkpoint_score_attribute = 'val_loss',
-                #                                      checkpoint_score_order = 'min') 
+                local_dir =  f"/dbfs/{username}/dolly_train/job/",
+                callbacks=[MLflowLoggerCallback(experiment_name=f"/Users/{username}/dolly_multi-gpu_setup",save_artifact=False)],
+                checkpoint_config = CheckpointConfig(num_to_keep = 1, 
+                                                     checkpoint_score_attribute = 'eval_loss',
+                                                     checkpoint_score_order = 'min') 
     ),
     datasets={"train": train_dataset , 'evaluation' : test_dataset},
     preprocessor=preprocessor,
@@ -479,7 +450,11 @@ results = trainer.fit()
 
 # COMMAND ----------
 
-# DBTITLE 1,rlnnrngjdf
+# MAGIC %md
+# MAGIC ## Fetch the best model parameters 
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC You can use the returned {class}`~ray.air.Result` object to access metrics and the Ray AIR {class}`~ray.air.checkpoint.Checkpoint` associated with the last iteration.
 
@@ -490,57 +465,42 @@ checkpoint
 
 # COMMAND ----------
 
-!  ls /local_disk0/tmp/ray/job/session_latest/logs/dl_job/HuggingFaceTrainer_2023-04-25_09-47-41/HuggingFaceTrainer_3876c_00000_0_2023-04-25_09-47-41
+from training.generate import generate_response, load_model_tokenizer_for_generate
+from accelerate import init_empty_weights
+from transformers import AutoConfig, AutoModelForCausalLM,AutoTokenizer
+import os
+
+
+config = AutoConfig.from_pretrained(checkpoint.local_path)
+
+with init_empty_weights():
+    model = AutoModelForCausalLM.from_config(config)
+
+model.tie_weights()
+
+from accelerate import infer_auto_device_map
+
+device_map = infer_auto_device_map(model, max_memory={0: "20GiB", "cpu": "60GiB"},no_split_module_classes=["GPTNeoXLayer"])
+
+model = AutoModelForCausalLM.from_pretrained(
+        checkpoint, device_map=device_map, torch_dtype=torch.bfloat16,GPTNeoXLayer
+    )
 
 # COMMAND ----------
+tokenizer = AutoTokenizer.from_pretrained(checkpoint, padding_side="left")
 
-# MAGIC %md
-# MAGIC ### Generate text from prompt
-# MAGIC 
-# MAGIC We can use the {class}`~ray.train.huggingface.huggingface_predictor.HuggingFacePredictor` to generate predictions from our fine-tuned model.
-# MAGIC 
-# MAGIC ```{tip}
-# MAGIC For large scale batch inference, consider configuring cloud checkpointing and then pass the cloud-backed {class}`~ray.air.checkpoint.Checkpoint` to {class}`~ray.train.batch_predictor.BatchPredictor`. More information [here](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-predictors).
-# MAGIC ```
-# MAGIC 
-# MAGIC Because the {class}`~ray.train.huggingface.huggingface_predictor.HuggingFacePredictor` uses a 🤗 Transformers [`pipeline`](https://huggingface.co/docs/transformers/en/main_classes/pipelines) under the hood, we disable the tokenizer AIR Preprocessor we have used for training and let the `pipeline` to tokenize the data itself.
+# Examples from https://www.databricks.com/blog/2023/03/24/hello-dolly-democratizing-magic-chatgpt-open-models.html
+instructions = [
+    "Write a love letter to Edgar Allan Poe.",
+    "Write a tweet announcing Dolly, a large language model from Databricks.",
+    "I'm selling my Nikon D-750, write a short blurb for my ad.",
+    "Explain to me the difference between nuclear fission and fusion.",
+    "Give me a list of 5 science fiction books I should read next.",
+]
 
-# COMMAND ----------
-
-checkpoint.set_preprocessor(None)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC We also set `device_map="auto"` so that the model is automatically placed on the right device and set the `task` to `"text-generation"`. The `predict` method passes the arguments to a 🤗 Transformers `pipeline` call.
-
-# COMMAND ----------
-
-from ray.train.huggingface import HuggingFacePredictor
-import pandas as pd
-
-prompts = pd.DataFrame(["Romeo and Juliet", "Romeo", "Juliet"], columns=["text"])
-
-# Predict on the head node.
-predictor = HuggingFacePredictor.from_checkpoint(
-    checkpoint=checkpoint,
-    task="text-generation",
-    torch_dtype=torch.float16 if use_gpu else None,
-    device_map="auto",
-    use_gpu=use_gpu,
-)
-prediction = predictor.predict(
-    prompts,
-    do_sample=True,
-    temperature=0.9,
-    min_length=32,
-    max_length=128,
-)
-
-# COMMAND ----------
-
-prediction
-
-# COMMAND ----------
-
+# Use the model to generate responses for each of the instructions above.
+for instruction in instructions:
+    response = generate_response(instruction, model=model, tokenizer=tokenizer)
+    if response:
+        print(f"Instruction: {instruction}\n\n{response}\n\n-----------\n")
 
