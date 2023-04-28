@@ -85,7 +85,7 @@ When using V100s (ex: `p3.2xlarge`, 1 x V100 16GB, `NC6s_v3`), in all cases, set
 
 Otherwise, follow the steps above. The 12B param model may not function well in 8-bit on V100s.
 
-## Getting Started with Training
+## Getting Started with Multi-Node Training
 
 - Add the `dolly` repo to Databricks (under Repos click Add Repo, enter `https://github.com/databrickslabs/dolly.git`, then click Create Repo).
 
