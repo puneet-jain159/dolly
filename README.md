@@ -125,8 +125,8 @@ These modifications are not optimal, but are simple to make.
 
   | Notebook                          |GPU | Batch Size | Epochs  | Time | 
   | --------------------------------- | ---------- | ---------- | ------- | ------ |
-  | ray_train_multi_gpu_dbr_13_A10 |A10| 10 | 2 | 2.27hr | 
-  | ray_train_multi_gpu_12_2_dbr_v100 |v100| 12 | 2 | 2.01hr |
+  | ray_train_multi_gpu_dbr_13_A10 |16xA10| 10 | 2 | 2.27hr | 
+  | ray_train_multi_gpu_12_2_dbr_v100 |16xv100| 12 | 2 | 2.01hr |
 
 #### V100 GPUs
 
