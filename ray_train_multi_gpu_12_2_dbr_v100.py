@@ -480,11 +480,10 @@ model.tie_weights()
 
 from accelerate import infer_auto_device_map
 
-device_map = infer_auto_device_map(model, max_memory={0: "20GiB", "cpu": "60GiB"},no_split_module_classes=["GPTNeoXLayer"])
+device_map = infer_auto_device_map(model, max_memory={0: "30GiB", "cpu": "60GiB"},no_split_module_classes=["GPTNeoXLayer"])
 
 model = AutoModelForCausalLM.from_pretrained(
-        checkpoint, device_map=device_map, torch_dtype=torch.bfloat16,GPTNeoXLayer
-    )
+        checkpoint, device_map=device_map, torch_dtype=torch.fploat16)
 
 # COMMAND ----------
 tokenizer = AutoTokenizer.from_pretrained(checkpoint, padding_side="left")
