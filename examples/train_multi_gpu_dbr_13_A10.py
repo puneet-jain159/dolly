@@ -1,6 +1,18 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC **This notebook has been tested on 12.2 ML DBR runtime using 2 p3dn.48xlarge**
+# MAGIC **This notebook has been tested on 3 ML DBR runtime using 4 g5.24xlarge**
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Benefits:
+# MAGIC
+# MAGIC 1. NO custom SSH script required
+# MAGIC 2. No command-line trigger / and provides real-time updates
+# MAGIC 3. Runs using ray on spark API
+# MAGIC 4. Better UI to understand JOB performance and scale-out
+# MAGIC 5. Ray data API support data in parquet,csv and hf format
+# MAGIC 6. Has MLFlow integration to track Experiments
 
 # COMMAND ----------
 
@@ -14,7 +26,6 @@
 # MAGIC This example focuses more on the performance and distributed computing aspects of Ray AIR. 
 # MAGIC
 # MAGIC It is highly recommended to read [Ray AIR Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-key-concepts) and [Ray Data Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/data_key_concepts) before starting this example.
-# MAGIC
 # MAGIC
 # MAGIC ```{note}
 # MAGIC In order to run this example, make sure your Ray cluster has access to at least 8 GPU's with 16 or more GBs of memory. The amount of memory needed will depend on the model. This notebook has been  tested with 4 g5.24xlarge workers and g4dn.8xlarge head node.
@@ -39,14 +50,14 @@
 # kernel_gateway_init = """
 # #!/bin/bash
 
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb -O /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-3_11.5.1.109-1_amd64.deb -O /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb -O /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-3_10.2.4.109-1_amd64.deb -O /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb && \
-# dpkg -i /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
-# dpkg -i /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
-# dpkg -i /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
-# dpkg -i /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb -O /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
+#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-7_11.10.1.25-1_amd64.deb -O /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
+#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb -O /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
+#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-7_10.2.10.91-1_amd64.deb -O /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb && \
+#  dpkg -i /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
+#  dpkg -i /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
+#  dpkg -i /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
+#  dpkg -i /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb
 # """ 
 # # Change ‘username’ to your Databricks username in DBFS
 # # Example: username = “stephen.offer@databricks.com”
@@ -132,14 +143,14 @@ from training.consts import (
 
 pretrained_model_name_or_path = "EleutherAI/pythia-12b"
 use_gpu = True
-num_workers = 16
-num_cpu_cores_per_worker = 96
-num_gpu_per_worker = 8
+num_workers = 16 # Configure based on the total gpus across the worker node
+num_cpu_cores_per_worker = 96 # total cpu's present in each node
+num_gpu_per_worker = 4 # total gpu's present in each node
 max_length = 1024
 local_output_dir = '/tmp/run/details'
 gradient_checkpointing = True
 seed = DEFAULT_SEED 
-username = "puneet.jain@databricks.com"
+username = 'puneet.jain@databricks.com'
 
 # COMMAND ----------
 
@@ -175,8 +186,6 @@ ray.init(runtime_env=runtime_env)
 
 # COMMAND ----------
 
-# THIS SHOULD BE HIDDEN IN DOCS AND ONLY RAN IN CI
-# Download the model from our S3 mirror as it's faster
 
 def force_on_node(node_id: str, remote_func_or_actor_class):
     scheduling_strategy = ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
@@ -200,7 +209,7 @@ def run_on_every_node(remote_func_or_actor_class, **remote_kwargs):
 
 @ray.remote(num_gpus=1)
 def download_model():
-    snapshot_download(pretrained_model_name_or_path,resume_download=True) 
+    snapshot_download(pretrained_model_name_or_path,local_dir = '/local_disk0/tmp/',resume_download=True) 
   
 
 _ = run_on_every_node(download_model)
@@ -222,12 +231,12 @@ current_dataset = current_dataset.train_test_split(seed=DEFAULT_SEED)
 # current_dataset['train'].select(list(range(0,1000))).save_to_disk("train.hf")
 # current_dataset['test'].select(list(range(0,1000))).save_to_disk('test.hf')
 
-current_dataset['train'].save_to_disk("train.hf")
-current_dataset['test'].save_to_disk('test.hf')
+current_dataset['train'].save_to_disk("/local_disk0/train.hf")
+current_dataset['test'].save_to_disk('/local_disk0/test.hf')
 del current_dataset
 
 # load the final data as ray data-set
-train_dataset = ray.data.from_huggingface(load_from_disk('train.hf'))
+train_dataset = ray.data.from_huggingface(load_from_disk('/local_disk0/train.hf'))
 test_dataset = ray.data.from_huggingface(load_from_disk('test.hf'))
 
 # COMMAND ----------
@@ -281,6 +290,7 @@ preprocessor = Chain(
     BatchMapper(preprocess, batch_format="pandas")
 )
 
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -307,9 +317,11 @@ preprocessor = Chain(
 # MAGIC
 # MAGIC As we are using data parallelism, each worker operates on its own shard of the data. The batch size set in `TrainingArguments` is the **per device batch size** (per worker batch size). By changing the number of workers, we can change the **effective batch size** and thus the time needed for training to complete. The effective batch size is then calculated as `per device batch size * number of workers * number of gradient accumulation steps`. As we add more workers, the effective batch size rises and thus we need less time to complete a full epoch. While the speedup is not exactly linear due to extra communication overheads, in many cases it can be close to linear.
 # MAGIC
-# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 12.
+# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 10.
 # MAGIC
-# MAGIC * With 2 p3dn.48xlarge nodes, the effective batch size was 192, which equals to ~79 steps per epoch. One epoch took **~1 hour** (including initialization time).
+# MAGIC * With 4 g5.24xlarge nodes, the effective batch size was 160, which equals to 85 steps per epoch. two epoch took 2.27 hours (including initialization and saving time).
+# MAGIC
+# MAGIC * With 8 g5.4xlarge nodes, the effective batch size was 512, which equals to 43 steps per epoch. One epoch took **~TBD** (including initialization time).
 
 # COMMAND ----------
 
@@ -333,7 +345,7 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     save_steps = config.get("save_steps", 1000)
     eval_steps = config.get("eval_steps", 50) 
     save_total_limit = config.get("save_total_limit", 5)
-    warmup_steps = config.get("warmup_steps", 25)
+    warmup_steps = config.get("warmup_steps", 50)
     
     deepspeed=config.get("deepspeed", "configs/ds_z3_bf16_config.json")
 
@@ -350,8 +362,8 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
         output_dir=local_output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
         per_device_eval_batch_size=per_device_eval_batch_size,
-        fp16=True,  #Set this to true for V100 series and bf16 to false
-        bf16=False, # Set this to true for A10 and A100 serios and fp16 to false
+        fp16=False,
+        bf16=True,
         learning_rate=lr,
         num_train_epochs=epochs,
         deepspeed='/tmp'+'/deepspeed.json',
@@ -363,7 +375,7 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
         eval_steps=eval_steps,
         save_strategy="no",
         save_steps=save_steps,
-        load_best_model_at_end=False, # loaded by ray
+        load_best_model_at_end=False,
         disable_tqdm=True,
         remove_unused_columns=False,
         warmup_steps=warmup_steps)
@@ -377,8 +389,6 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     print("Model loaded")
     print("Train data size: %d", len(train_dataset))
     print("Test data size: %d", len(eval_dataset))
-    print("type of data test: %d", type(eval_dataset))
-    print("type of data train: %d", type(train_dataset))
 
     data_collator = DataCollatorForCompletionOnlyLM(
         tokenizer=tokenizer, mlm=False, return_tensors="pt", pad_to_multiple_of=8
@@ -407,6 +417,10 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
 
 # COMMAND ----------
 
+# avoid duplication and correct
+
+# COMMAND ----------
+
 root_path = os.getcwd()
 deepspeed_config = os.path.join(root_path, "config/ds_z3_bf16_config.json")
 
@@ -419,14 +433,14 @@ trainer = HuggingFaceTrainer(
     trainer_init_config={
         "deepspeed": deepspeed_config, 
         "lr" : 1e-6, # per device
-        "per_device_train_batch_size" : 12,
-        "per_device_eval_batch_size" : 12,
+        "per_device_train_batch_size" : 10,
+        "per_device_eval_batch_size" : 10,
         "epochs": 2,
     },
     scaling_config=ScalingConfig(
         num_workers=16,
         use_gpu=use_gpu,
-        resources_per_worker={"GPU": 1, "CPU": 10}),
+        resources_per_worker={"GPU": 1, "CPU": 22}),
     run_config = RunConfig(
                 local_dir =  f"/dbfs/{username}/dolly_train/job/",
                 callbacks=[MLflowLoggerCallback(experiment_name=f"/Users/{username}/dolly_multi-gpu_setup",save_artifact=False)],
@@ -437,6 +451,11 @@ trainer = HuggingFaceTrainer(
     datasets={"train": train_dataset , 'evaluation' : test_dataset},
     preprocessor=preprocessor,
 )
+
+# COMMAND ----------
+
+# syncer checkpointing
+# Events 
 
 # COMMAND ----------
 
@@ -465,6 +484,11 @@ checkpoint
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Generate text from prompt
+
+# COMMAND ----------
+
 from training.generate import generate_response, load_model_tokenizer_for_generate
 from accelerate import init_empty_weights
 from transformers import AutoConfig, AutoModelForCausalLM,AutoTokenizer
@@ -480,10 +504,10 @@ model.tie_weights()
 
 from accelerate import infer_auto_device_map
 
-device_map = infer_auto_device_map(model, max_memory={0: "30GiB", "cpu": "60GiB"},no_split_module_classes=["GPTNeoXLayer"])
+device_map = infer_auto_device_map(model, max_memory={0: "20GiB", "cpu": "60GiB"},no_split_module_classes=["GPTNeoXLayer"])
 
 model = AutoModelForCausalLM.from_pretrained(
-        checkpoint, device_map=device_map, torch_dtype=torch.fploat16)
+        checkpoint, device_map=device_map, torch_dtype=torch.bfloat16)
 
 # COMMAND ----------
 tokenizer = AutoTokenizer.from_pretrained(checkpoint, padding_side="left")
