@@ -1,18 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC **This notebook has been tested on 3 ML DBR runtime using 4 g5.24xlarge**
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC Benefits:
-# MAGIC
-# MAGIC 1. NO custom SSH script required
-# MAGIC 2. No command-line trigger / and provides real-time updates
-# MAGIC 3. Runs using ray on spark API
-# MAGIC 4. Better UI to understand JOB performance and scale-out
-# MAGIC 5. Ray data API support data in parquet,csv and hf format
-# MAGIC 6. Has MLFlow integration to track Experiments
+# MAGIC **This notebook has been tested on 12.X ML DBR runtime using 2 p3dn.48xlarge**
 
 # COMMAND ----------
 
@@ -28,8 +16,14 @@
 # MAGIC It is highly recommended to read [Ray AIR Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/air-key-concepts) and [Ray Data Key Concepts](https://raw.githubusercontent.com/ray-project/ray/master/doc/source/ray-air/examples/data_key_concepts) before starting this example.
 # MAGIC
 # MAGIC ```{note}
-# MAGIC In order to run this example, make sure your Ray cluster has access to at least 8 GPU's with 16 or more GBs of memory. The amount of memory needed will depend on the model. This notebook has been  tested with 4 g5.24xlarge workers and g4dn.8xlarge head node.
+# MAGIC In order to run this example, make sure your Ray cluster has access to at least 8 GPU's with 24 or more GBs of memory. The amount of memory needed will depend on the model. This notebook has been  tested with 2 p3dn.48xlarge workers and g4dn.8xlarge head node.
 # MAGIC ```
+# MAGIC Benefits:
+# MAGIC
+# MAGIC - No command-line trigger / and provides real-time updates
+# MAGIC - Better UI to understand JOB performance and adjust the batch-size and performance configd
+# MAGIC - Ray data API support data in parquet,csv and hf format
+# MAGIC - Has MLFlow integration to track Experiments
 # MAGIC
 # MAGIC In this notebook, we will:
 # MAGIC 1. [Add Dependencies to run deepspeed](#Deepspeed)
@@ -50,14 +44,14 @@
 # kernel_gateway_init = """
 # #!/bin/bash
 
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb -O /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
-#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-7_11.10.1.25-1_amd64.deb -O /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
-#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb -O /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
-#  wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-7_10.2.10.91-1_amd64.deb -O /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb && \
-#  dpkg -i /tmp/libcusparse-dev-11-7_11.7.3.50-1_amd64.deb && \
-#  dpkg -i /tmp/libcublas-dev-11-7_11.10.1.25-1_amd64.deb && \
-#  dpkg -i /tmp/libcusolver-dev-11-7_11.4.0.1-1_amd64.deb && \
-#  dpkg -i /tmp/libcurand-dev-11-7_10.2.10.91-1_amd64.deb
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb -O /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcublas-dev-11-3_11.5.1.109-1_amd64.deb -O /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb -O /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/libcurand-dev-11-3_10.2.4.109-1_amd64.deb -O /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb && \
+# dpkg -i /tmp/libcusparse-dev-11-3_11.5.0.58-1_amd64.deb && \
+# dpkg -i /tmp/libcublas-dev-11-3_11.5.1.109-1_amd64.deb && \
+# dpkg -i /tmp/libcusolver-dev-11-3_11.1.2.109-1_amd64.deb && \
+# dpkg -i /tmp/libcurand-dev-11-3_10.2.4.109-1_amd64.deb
 # """ 
 # # Change ‘username’ to your Databricks username in DBFS
 # # Example: username = “stephen.offer@databricks.com”
@@ -85,6 +79,7 @@ import re
 import json
 import logging
 import subprocess
+import mlflow
 
 from pathlib import Path
 from functools import partial
@@ -103,6 +98,7 @@ from ray.util.spark import setup_ray_cluster, shutdown_ray_cluster,MAX_NUM_WORKE
 
 from training.trainer import load_training_dataset
 from training.consts import DEFAULT_INPUT_MODEL, SUGGESTED_INPUT_MODELS
+from training.utils import get_or_create_experiment
 
 
 
@@ -112,6 +108,7 @@ from huggingface_hub import snapshot_download
 from datasets import load_dataset,load_from_disk
 
 import numpy as np
+import pandas as pd
 import torch 
 
 from transformers import (
@@ -143,14 +140,15 @@ from training.consts import (
 
 pretrained_model_name_or_path = "EleutherAI/pythia-12b"
 use_gpu = True
-num_workers = 16 # Configure based on the total gpus across the worker node
-num_cpu_cores_per_worker = 96 # total cpu's present in each node
-num_gpu_per_worker = 4 # total gpu's present in each node
+num_workers = 16
+num_cpu_cores_per_worker = 96
+num_gpu_per_worker = 8
 max_length = 1024
 local_output_dir = '/tmp/run/details'
 gradient_checkpointing = True
 seed = DEFAULT_SEED 
-username = 'puneet.jain@databricks.com'
+username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('user')
+experiment_location = f"/Users/{username}/dolly_multi-gpu"
 
 # COMMAND ----------
 
@@ -186,6 +184,8 @@ ray.init(runtime_env=runtime_env)
 
 # COMMAND ----------
 
+# THIS SHOULD BE HIDDEN IN DOCS AND ONLY RAN IN CI
+# Download the model from our S3 mirror as it's faster
 
 def force_on_node(node_id: str, remote_func_or_actor_class):
     scheduling_strategy = ray.util.scheduling_strategies.NodeAffinitySchedulingStrategy(
@@ -209,7 +209,7 @@ def run_on_every_node(remote_func_or_actor_class, **remote_kwargs):
 
 @ray.remote(num_gpus=1)
 def download_model():
-    snapshot_download(pretrained_model_name_or_path,local_dir = '/local_disk0/tmp/',resume_download=True) 
+    snapshot_download(pretrained_model_name_or_path,resume_download=True) 
   
 
 _ = run_on_every_node(download_model)
@@ -225,6 +225,8 @@ _ = run_on_every_node(download_model)
 
 # COMMAND ----------
 
+# Splitting the data into test and train 
+
 current_dataset = load_training_dataset()
 current_dataset = current_dataset.train_test_split(seed=DEFAULT_SEED)
 
@@ -237,7 +239,7 @@ del current_dataset
 
 # load the final data as ray data-set
 train_dataset = ray.data.from_huggingface(load_from_disk('/local_disk0/train.hf'))
-test_dataset = ray.data.from_huggingface(load_from_disk('test.hf'))
+test_dataset = ray.data.from_huggingface(load_from_disk('/local_disk0/test.hf'))
 
 # COMMAND ----------
 
@@ -290,7 +292,6 @@ preprocessor = Chain(
     BatchMapper(preprocess, batch_format="pandas")
 )
 
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -317,11 +318,9 @@ preprocessor = Chain(
 # MAGIC
 # MAGIC As we are using data parallelism, each worker operates on its own shard of the data. The batch size set in `TrainingArguments` is the **per device batch size** (per worker batch size). By changing the number of workers, we can change the **effective batch size** and thus the time needed for training to complete. The effective batch size is then calculated as `per device batch size * number of workers * number of gradient accumulation steps`. As we add more workers, the effective batch size rises and thus we need less time to complete a full epoch. While the speedup is not exactly linear due to extra communication overheads, in many cases it can be close to linear.
 # MAGIC
-# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 10.
+# MAGIC The preprocessed dataset has ~15000 examples. We have set per device batch size to 12.
 # MAGIC
-# MAGIC * With 4 g5.24xlarge nodes, the effective batch size was 160, which equals to 85 steps per epoch. two epoch took 2.27 hours (including initialization and saving time).
-# MAGIC
-# MAGIC * With 8 g5.4xlarge nodes, the effective batch size was 512, which equals to 43 steps per epoch. One epoch took **~TBD** (including initialization time).
+# MAGIC * With 2 p3dn.48xlarge nodes, the effective batch size was 192, which equals to ~79 steps per epoch.
 
 # COMMAND ----------
 
@@ -336,24 +335,22 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
     # Enable tf32 for better performance
     torch.backends.cuda.matmul.allow_tf32 = True
 
-    epochs = config.get("epochs", 2)
-    lr = config.get("lr", 5e-6)
-    per_device_train_batch_size = config.get("per_device_train_batch_size", 8)
-    per_device_eval_batch_size = config.get("per_device_eval_batch_size", 8)
+    # Get config details
 
-    logging_steps = config.get("logging_steps", 50)
-    save_steps = config.get("save_steps", 1000)
-    eval_steps = config.get("eval_steps", 50) 
-    save_total_limit = config.get("save_total_limit", 5)
-    warmup_steps = config.get("warmup_steps", 50)
-    
+    epochs = config.get("epochs")
+    lr = config.get("lr")
+    per_device_train_batch_size = config.get("per_device_train_batch_size")
+    per_device_eval_batch_size = config.get("per_device_eval_batch_size")
+    logging_steps = config.get("logging_steps")
+    save_strategy= config.get("save_strategy")
+    evaluation_strategy = config.get("evaluation_strategy")
+    save_steps = config.get("save_steps")
+    eval_steps = config.get("eval_steps") 
+    warmup_steps = config.get("warmup_steps")
+    disable_tqdm=config.get("disable_tqdm")
+    remove_unused_columns=config.get("remove_unused_columns")
     deepspeed=config.get("deepspeed", "configs/ds_z3_bf16_config.json")
 
-    disable_tqdm=config.get("disable_tqdm", True)
-    remove_unused_columns=config.get("remove_unused_columns", False)
-
-    # if not dbfs_output_dir:
-    # logger.warn("Will NOT save to DBFS")
     with open('/tmp'+'/deepspeed.json', 'w') as f:
       json.dump(deepspeed, f)
 
@@ -362,22 +359,21 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
         output_dir=local_output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
         per_device_eval_batch_size=per_device_eval_batch_size,
-        fp16=False,
-        bf16=True,
+        fp16=True, # change to true if using v100
+        bf16=False,# chenge to false if using v100
         learning_rate=lr,
         num_train_epochs=epochs,
         deepspeed='/tmp'+'/deepspeed.json',
         gradient_checkpointing=gradient_checkpointing,
-        logging_dir=f"{local_output_dir}/runs",
-        logging_strategy="steps",
+        logging_strategy=evaluation_strategy,
         logging_steps=logging_steps,
-        evaluation_strategy="steps",
+        evaluation_strategy=evaluation_strategy,
         eval_steps=eval_steps,
-        save_strategy="no",
+        save_strategy=save_strategy,
         save_steps=save_steps,
         load_best_model_at_end=False,
-        disable_tqdm=True,
-        remove_unused_columns=False,
+        disable_tqdm=disable_tqdm,
+        remove_unused_columns=remove_unused_columns,
         warmup_steps=warmup_steps)
 
     print("Loading model")
@@ -410,23 +406,18 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
 # MAGIC With our `trainer_init_per_worker` complete, we can now instantiate the {class}`~ray.train.huggingface.huggingface_trainer.HuggingFaceTrainer`. Aside from the function, we set the `scaling_config`, controlling the amount of workers and resources used, and the `datasets` we will use for training and evaluation.
 # MAGIC
 # MAGIC We pass the preprocessors we have defined earlier as an argument, wrapped in a {class}`~ray.data.preprocessors.chain.Chain`. The preprocessor will be included with the returned {class}`~ray.air.checkpoint.Checkpoint`, meaning it will also be applied during inference.
-# MAGIC
-# MAGIC ```{note}
-# MAGIC If you want to upload checkpoints to cloud storage (eg. S3), set {class}`air.RunConfig(storage_path) <ray.air.RunConfig>`. See {ref}`train-run-config` for an example. Using cloud storage is highly recommended, especially for production.
-# MAGIC ```
 
 # COMMAND ----------
 
-# avoid duplication and correct
+# get or create experiment
+get_or_create_experiment(experiment_location)
 
-# COMMAND ----------
 
 root_path = os.getcwd()
 deepspeed_config = os.path.join(root_path, "config/ds_z3_bf16_config.json")
 
 with open(deepspeed_config) as json_data:
     deepspeed_config = json.load(json_data)
-
 
 trainer = HuggingFaceTrainer(
     trainer_init_per_worker=trainer_init_per_worker,
@@ -435,27 +426,30 @@ trainer = HuggingFaceTrainer(
         "lr" : 1e-6, # per device
         "per_device_train_batch_size" : 10,
         "per_device_eval_batch_size" : 10,
-        "epochs": 2,
-    },
-    scaling_config=ScalingConfig(
+        "save_strategy" : "no",
+        "evaluation_strategy" : "steps",
+        "logging_steps" : 50,
+        "save_steps" : 200,
+        "eval_steps" : 50,
+        "warmup_steps" : 25,
+        "disable_tqdm" : True,
+        "remove_unused_columns" :False,
+        "epochs": 2},
+        scaling_config=ScalingConfig(
         num_workers=16,
         use_gpu=use_gpu,
-        resources_per_worker={"GPU": 1, "CPU": 22}),
+        resources_per_worker={"GPU": 1, "CPU": 10}), # should be total cores in node /total gpu's in node -2
     run_config = RunConfig(
                 local_dir =  f"/dbfs/{username}/dolly_train/job/",
-                callbacks=[MLflowLoggerCallback(experiment_name=f"/Users/{username}/dolly_multi-gpu_setup",save_artifact=False)],
+                callbacks=[MLflowLoggerCallback(experiment_name=experiment_location,save_artifact=False)],
                 checkpoint_config = CheckpointConfig(num_to_keep = 1, 
                                                      checkpoint_score_attribute = 'eval_loss',
                                                      checkpoint_score_order = 'min') 
     ),
-    datasets={"train": train_dataset , 'evaluation' : test_dataset},
+    datasets={"train": train_dataset , 
+              "evaluation" : test_dataset},
     preprocessor=preprocessor,
 )
-
-# COMMAND ----------
-
-# syncer checkpointing
-# Events 
 
 # COMMAND ----------
 
@@ -489,41 +483,31 @@ checkpoint
 
 # COMMAND ----------
 
-from training.generate import generate_response, load_model_tokenizer_for_generate
-from accelerate import init_empty_weights
-from transformers import AutoConfig, AutoModelForCausalLM,AutoTokenizer
-import os
+import ray.data
+import pandas as pd
+from training.generate import PredictCallable
 
-
-config = AutoConfig.from_pretrained(checkpoint.local_path)
-
-with init_empty_weights():
-    model = AutoModelForCausalLM.from_config(config)
-
-model.tie_weights()
-
-from accelerate import infer_auto_device_map
-
-device_map = infer_auto_device_map(model, max_memory={0: "20GiB", "cpu": "60GiB"},no_split_module_classes=["GPTNeoXLayer"])
-
-model = AutoModelForCausalLM.from_pretrained(
-        checkpoint, device_map=device_map, torch_dtype=torch.bfloat16)
-
-# COMMAND ----------
-tokenizer = AutoTokenizer.from_pretrained(checkpoint, padding_side="left")
-
-# Examples from https://www.databricks.com/blog/2023/03/24/hello-dolly-democratizing-magic-chatgpt-open-models.html
 instructions = [
     "Write a love letter to Edgar Allan Poe.",
     "Write a tweet announcing Dolly, a large language model from Databricks.",
     "I'm selling my Nikon D-750, write a short blurb for my ad.",
     "Explain to me the difference between nuclear fission and fusion.",
-    "Give me a list of 5 science fiction books I should read next.",
-]
+    "Give me a list of 5 science fiction books I should read next."]
 
-# Use the model to generate responses for each of the instructions above.
-for instruction in instructions:
-    response = generate_response(instruction, model=model, tokenizer=tokenizer)
-    if response:
-        print(f"Instruction: {instruction}\n\n{response}\n\n-----------\n")
+ds = ray.data.from_pandas(pd.DataFrame(pd.Series(instructions),columns=["prompt"]))
 
+# COMMAND ----------
+
+preds = (
+    ds
+    .repartition(5)
+    .map_batches(
+        PredictCallable,
+        batch_size=1,
+        fn_constructor_kwargs=dict(checkpoint=checkpoint.uri.split('file://')[1],
+                                   torch_dtype = "float16" ),#change to float16 when using V100
+        batch_format="pandas",
+        compute=ray.data.ActorPoolStrategy(),
+        num_gpus=4,
+    )
+)

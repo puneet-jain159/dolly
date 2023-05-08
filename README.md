@@ -160,7 +160,7 @@ dbutils.fs.put("dbfs:/Users/{0}/init/ray.sh".format(username), kernel_gateway_in
 ```
 - Attach the [`init script to the cluster`](https://docs.databricks.com/clusters/init-scripts.html#cluster-scoped-init-scripts) and start the cluster.
 
-- Open the `ray_train_multi_gpu_12_2_dbr_v100` notebook in the Repo (which is the `ray_train_multi_gpu_12_2_dbr_v100.py` file in the Github `dolly` repo), attach to your GPU cluster, and run all cells.  When training finishes, the notebook will save the model under `local_dir =  f"/dbfs/{username}/dolly_train/job/`.
+- Open the `train_dolly_multi_gpu` notebook in the Repo (which is the `ray_train_multi_gpu_12_2_dbr_v100.py` file in the Github `dolly` repo), attach to your GPU cluster, and run all cells.  When training finishes, the notebook will save the model under `local_dir =  f"/dbfs/{username}/dolly_train/job/`.
 
 ### Training on Other Instances and benchmarks
 
