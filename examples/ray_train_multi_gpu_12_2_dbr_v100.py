@@ -415,11 +415,11 @@ get_or_create_experiment(experiment_location)
 #Create tags to log with mlflow
 tags = dict(
   local_dir = f"/dbfs/{username}/dolly_train/job/",
-  model = pretrained_model_name_or_path,
-  n_gpus = num_workers,
-  num_cpu_cores_per_worker = num_cpu_cores_per_worker
-  num_gpu_per_worker = num_gpu_per_worker,  
-  max_length = max_length,
+  base_model_dir = pretrained_model_name_or_path,
+  n_gpus = str(num_workers),
+  num_cpu_cores_per_worker = str(num_cpu_cores_per_worker),
+  num_gpu_per_worker = str(num_gpu_per_worker),  
+  max_length = str(max_length),
   username = username )
 
 
