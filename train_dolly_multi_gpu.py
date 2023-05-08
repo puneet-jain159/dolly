@@ -456,7 +456,7 @@ trainer = HuggingFaceTrainer(
                 callbacks=[MLflowLoggerCallback(experiment_name=experiment_location,
                                                 tags = tags,
                                                 save_artifact=False)],
-                checkpoint_config = CheckpointConfig(num_to_keep = 2, 
+                checkpoint_config = CheckpointConfig(num_to_keep = 1, 
                                                      checkpoint_score_attribute = 'eval_loss',
                                                      checkpoint_score_order = 'min') 
     ),
