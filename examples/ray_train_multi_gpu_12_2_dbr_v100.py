@@ -412,6 +412,16 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
 # get or create experiment
 get_or_create_experiment(experiment_location)
 
+#Create tags to log with mlflow
+tags = dict(
+  local_dir = f"/dbfs/{username}/dolly_train/job/",
+  model = pretrained_model_name_or_path,
+  n_gpus = num_workers,
+  num_cpu_cores_per_worker = num_cpu_cores_per_worker
+  num_gpu_per_worker = num_gpu_per_worker,  
+  max_length = max_length,
+  username = username )
+
 
 root_path = os.getcwd()
 deepspeed_config = os.path.join(root_path, "config/ds_z3_bf16_config.json")
@@ -441,7 +451,9 @@ trainer = HuggingFaceTrainer(
         resources_per_worker={"GPU": 1, "CPU": 10}), # should be total cores in node /total gpu's in node -2
     run_config = RunConfig(
                 local_dir =  f"/dbfs/{username}/dolly_train/job/",
-                callbacks=[MLflowLoggerCallback(experiment_name=experiment_location,save_artifact=False)],
+                callbacks=[MLflowLoggerCallback(experiment_name=experiment_location,
+                                                tags = tags,
+                                                save_artifact=False)],
                 checkpoint_config = CheckpointConfig(num_to_keep = 1, 
                                                      checkpoint_score_attribute = 'eval_loss',
                                                      checkpoint_score_order = 'min') 
@@ -511,3 +523,7 @@ preds = (
         num_gpus=4,
     )
 )
+
+# COMMAND ----------
+
+preds.take_all()
