@@ -4,6 +4,7 @@ from typing import List, Tuple
 import torch
 
 import numpy as np
+import pandas as pd
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -238,3 +239,51 @@ def generate_response(
 
     generation_pipeline = InstructionTextGenerationPipeline(model=model, tokenizer=tokenizer, **kwargs)
     return generation_pipeline(instruction)[0]["generated_text"]
+
+
+
+
+class PredictCallable:
+    '''
+    Class to generate prediction using ray map API
+    '''
+    def __init__(self,torch_dtype = None,
+                      checkpoint= None):
+        from transformers import AutoConfig, AutoModelForCausalLM,AutoTokenizer
+        import torch
+        import os
+        from training.generate import generate_response, load_model_tokenizer_for_generate
+        from accelerate import init_empty_weights
+        import pandas as pd
+        if torch_dtype == 'bfloat16':
+          self.torch_dtype = torch.bfloat16
+        else:
+          self.torch_dtype = torch.float16
+        config = AutoConfig.from_pretrained(checkpoint)
+
+        with init_empty_weights():
+          model = AutoModelForCausalLM.from_config(config)
+
+        model.tie_weights()
+
+        from accelerate import infer_auto_device_map
+
+        device_map = infer_auto_device_map(model,no_split_module_classes=["GPTNeoXLayer"])
+
+        print("loading model weights ......")
+        self.model = AutoModelForCausalLM.from_pretrained(
+                     checkpoint, device_map=device_map,
+                     torch_dtype=self.torch_dtype)
+        print("loading model tokenizer ......")
+        self.tokenizer = AutoTokenizer.from_pretrained(checkpoint,
+                                                       padding_side="left")
+
+    def __call__(self, batch: pd.DataFrame) -> pd.DataFrame:
+        from training.generate import generate_response, load_model_tokenizer_for_generate
+        responses = []
+        for instruction in list(batch["prompt"]):
+            response = generate_response(instruction, model=self.model, tokenizer=self.tokenizer)
+        if response:
+            print(f"Instruction: {instruction}\n\n{response}\n\n-----------\n")
+            responses.append(f"Instruction: {instruction}\n\n{response}\n\n-----------\n")
+        return pd.DataFrame(responses, columns=["responses"])
