@@ -176,7 +176,7 @@ setup_ray_cluster(
 runtime_env = {
     "env_vars": {"RAY_memory_monitor_refresh_ms": "0"}
 }
-ray.init(runtime_env=runtime_env)
+ray.init()
 
 # COMMAND ----------
 
@@ -231,11 +231,11 @@ _ = run_on_every_node(download_model)
 current_dataset = load_training_dataset()
 current_dataset = current_dataset.train_test_split(seed=DEFAULT_SEED)
 
-# current_dataset['train'].select(list(range(0,1000))).save_to_disk("train.hf")
-# current_dataset['test'].select(list(range(0,1000))).save_to_disk('test.hf')
+current_dataset['train'].select(list(range(0,1000))).save_to_disk("/local_disk0/train.hf")
+current_dataset['test'].select(list(range(0,1000))).save_to_disk('/local_disk0/test.hf')
 
-current_dataset['train'].save_to_disk("/local_disk0/train.hf")
-current_dataset['test'].save_to_disk('/local_disk0/test.hf')
+# current_dataset['train'].save_to_disk("/local_disk0/train.hf")
+# current_dataset['test'].save_to_disk('/local_disk0/test.hf')
 del current_dataset
 
 # load the final data as ray data-set
@@ -414,6 +414,11 @@ def trainer_init_per_worker(train_dataset, eval_dataset=None, **config):
 # get or create experiment
 get_or_create_experiment(experiment_location)
 
+
+sync_config = tune.SyncConfig(
+  syncer=None
+    # upload_dir="s3://one-env-eu-west-1/users/puneet.jain@databricks.com/",  # requires AWS credential
+    )
 #Create tags to log with mlflow
 tags = dict(
   local_dir = f"/dbfs/{username}/dolly_train/job/",
@@ -437,12 +442,12 @@ trainer = HuggingFaceTrainer(
         "lr" : 1e-6, # per device
         "per_device_train_batch_size" : 10,
         "per_device_eval_batch_size" : 10,
-        "save_strategy" : "no",
+        "save_strategy" : "steps",
         "evaluation_strategy" : "steps",
-        "logging_steps" : 50,
-        "save_steps" : 200,
-        "eval_steps" : 50,
-        "warmup_steps" : 25,
+        "logging_steps" : 5,
+        "save_steps" : 5,
+        "eval_steps" : 5,
+        "warmup_steps" : 5,
         "disable_tqdm" : True,
         "remove_unused_columns" :False,
         "epochs": 3},
@@ -456,6 +461,7 @@ trainer = HuggingFaceTrainer(
                 callbacks=[MLflowLoggerCallback(experiment_name=experiment_location,
                                                 tags = tags,
                                                 save_artifact=False)],
+                sync_config=sync_config,
                 checkpoint_config = CheckpointConfig(num_to_keep = 1, 
                                                      checkpoint_score_attribute = 'eval_loss',
                                                      checkpoint_score_order = 'min') 
